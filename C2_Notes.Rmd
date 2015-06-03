@@ -1,0 +1,99 @@
+---
+title: "Advanced R C2"
+author: "Phil"
+output: html_document
+---
+
+##Vectors
+
+- two flavours, atomic vectors and lists
+- atomic vectors must be all the same type, lists can have elements of different types
+- typeof() length and attributes()
+
+
+### Atomic Vectors
+
+```{r}
+#can have integer, numeric, logical and
+#character vectors (also complex and raw, but rare)
+
+int_var <- c(1L, 6L, 10L)
+typeof(int_var)
+is.integer(int_var)
+is.atomic(int_var)
+is.list(int_var)
+```
+
+- note that is.numeric() tests for numberliness, and will give true for integer and double.
+
+#### Coercion of atomic vectors
+
+- if comine an atomic vector of different types, they will be coerced to the most flexible type
+
+```{r}
+str(c('a',1))
+
+#useful that TRUE and FALSE get coerced to 0 and 1 - can use sum() or mean()
+as.numeric(c(TRUE, FALSE, TRUE))
+```
+
+###Lists
+
+- lists can have elements of any type, including lists. This makes them recursive vectors
+
+```{r,}
+#can use both list() or c()
+x <- list(1,'a', TRUE, c(1,2,3))
+y <- c(1, 'a', TRUE, c(1,2,3))
+
+#c() will combine several lists at once. it will coerce vectors to list before combining
+x <- list(list(1, 2), c(3, 4))
+y <- c(list(1,2), c(3,4))
+str(x)
+str(y)
+```
+- coerce  to list with as.list(), check if a list with is.list()
+- NA is a logical vector, as it will be coerced to any other type if put in a vector. c(FALSE, NA_character_) will coerce FALSE to a character
+
+
+##Attributes
+
+- all objects can have arbitraty additional attributes to store metadata
+- can be accessed individuallu with attr() or all at once as a list with attributes()
+
+```{r,}
+x <- 1:10
+attr(x, 'my_attribute') <- 'this is a vector'
+attr(x, 'my_attribute')
+attr(x, 'my_attribute1') <- 'my name is phil'
+
+str(attributes(x))
+```
+- structure() is not the same as str(). structure() returns the given object with further attributes set
+
+```{r}
+structure(1:10, my_attribute='This is a vector')
+```
+
+- most attributes are lost when modifying vectors
+- the only attributres not lost are names, dimension and class. these have specific accessor functions names(), class() and dim(). DO NOT attr(x, 'names'), for example.
+
+###Names
+
+- can name a vector:
+
+```{r}
+x <- c(a=1, b=2, c=3)
+x <- 1:3 ; names(x) <- c('a', 'b', 'c')
+x <- setNames(1:3, c('a', 'b', 'c'))
+```
+- however names are not essential: if all missing names() returns null, if some missing names() returns emty string for those elements
+
+###Factors
+
+- remember as(numeric(as.character(blah))) to convert from factor to numeric
+
+```{r}
+gender <- factor(c('m', 'm', 'm'), levels = c('m', 'f'))
+table(gender)
+```

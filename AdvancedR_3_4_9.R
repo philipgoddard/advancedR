@@ -50,17 +50,22 @@ randRowCont <- function(inSeed){
   set.seed(inSeed)
   
   rowVec <- seq(from = 1, to = nrow(mtcars))
-  rowSamp <- sample(rowVec, 2, replace = FALSE)
-
-  rowStart <- min(rowSamp)
-  rowStop <- max(rowSamp)
   
+  flag <- TRUE
+  while(flag == TRUE){
+    rowSamp <- sample(rowVec, 2, replace = FALSE)
+    rowStart <- min(rowSamp)
+    rowStop <- max(rowSamp)
+    if(rowStop <= nrow(df)){flag = FALSE}
+  }
+
+  print(c(rowStart, rowStop))
   dfRandRowCont <- df[rowStart:rowStop, ]
   dfRandRowCont
 }
 
-randRowCont(1234)
-randRowCont(123344)
+randRowCont(1223334)
+randRowCont(124)
 
 
 #------------------------------------

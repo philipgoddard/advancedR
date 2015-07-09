@@ -1,0 +1,313 @@
+---
+title: "Functionals"
+output: html_document
+---
+
+### Functionals
+
+* We have already seen closures- a function that takes a function as an argument and returns another function. Now lets look at functionals- functions that take functions as inputs and return vectors
+
+```{r}
+# here is a simple functional
+
+randomise <- function(f) f(runif(1e3))
+randomise(mean)
+randomise(sum)
+```
+
+* three common functionals are lapply(), apply(), tapply().
+
+* functionals commonly used to avoid loops in R. Loops can be slow, but the real downside is that they are not very expressive. Functionals make it very clear what you are trying to achieve. Reduce bugs by better communicating intent.
+
+### lapply()
+
+```{r}
+# lets make lapply2()
+# it does the same as lapply, just not written in C
+lapply2 <- function(x, f, ...){
+  out <- vector("list", length(x))
+  for (i in seq_along(x)){
+    out[i] <- f(x[[i]], ...)
+  }
+  out
+}
+
+```
+
+* lapply is super handy to apply functions over columns in data frames e.g. lapply(mtcars, class), or mtcars[] <- lapply(mtcars, function(f) x / mean(x))
+
+* the peices of x are always supplied as the first argument to f. if you want to vary different argument, use anonymous function
+
+```{r}
+trims <- c(0, 0.1, 0.2, 0.5)
+x <- rcauchy(1000)
+unlist(lapply(trims, function(trim) mean(x, trim = trim)))
+```
+
+### Looping patterns
+
+* three basic ways to loop: loop over elements: for x in xs, loop over numeric indices: for (i in seq_along(xs))  and loop over names: for (nm in names(xs))
+
+* first way bad as leads to inefficient ways of saving output eg
+
+```{r}
+# this slow- R makes a copy of res at every iteration
+# when vector gets extended
+xs <- runif(1e3)
+res <- c()
+for (x in xs){
+  res <- c(res, sqrt(x))
+}
+
+# this is better
+res <- numeric(length(xs))
+for (i in seq_along(xs)){
+  res[i] <- sqrt(xs[i])
+}
+```
+
+* there are three basic ways to use lapply()
+
+```{r, eval=FALSE}
+# usually use the first form as lapply() takes care of saving the output
+# however if need the position or name of elemnt use the other forms
+lapply(xs, function(x) {})
+lapply(seq_along(xs), function(i) {})
+lapply(names(xs), function(nm) {})
+```
+
+### Friends of lapply()
+
+* sapply() and vapply() - variants of lapply that create vectors, matrices and arrays instead of lists
+* Map() and mapply() which iterate over multiple input data structures
+* mclapply() and mcMap() - parralel versions of lapply() and Map()
+* rollapply() writes new functions to solve a probelsm
+
+### sapply and vapply
+
+* very simialr to lapply(), except simplify output to produce atomic vector. sapply() guesses, vapply() takes argument specifying output type. sapply() good for interactive, vapply() more verbose and useful for use inside other functions
+
+```{r}
+sapply(mtcars, is.numeric)
+vapply(mtcars, is.numeric, logical(1))
+# hmm
+sapply(list(), is.numeric)
+# correct
+vapply(list(), is.numeric, logical(1))
+```
+
+* sapply is a thin wrapper around lapply(), that transforms to vector at final step. vapply() assigns results to a vector (or matrix) of appropriate type instead of as a list.
+
+```{r}
+# sapply does this
+sapply2 <- function(x, f, ...){
+  res <- lapply2(x, f, ...)
+  simplify2array(res)
+}
+
+# vapply does this
+vapply2 <- function(x, f, f.value, ...){
+  out <- matrix(rep(f.value, length(x)), nrow = length(x))
+  for (i in seq_along(x)){
+    res <- f(x[i], ...)
+    stopifnot(
+      length(res) == length(f.value),
+      typeof(res) == typeof(f.value)
+    )
+    out[i, ] <- res
+  }
+  out
+}
+```
+
+### Multiple inputs: Map and mapply()
+
+* with lapply(), only one argument to the functions varies, the others are fixed. This makes it poorly suited for some problems, eg weighted means when you have two lists- observations and weights
+
+```{r}
+# obs
+xs <- replicate(5, runif(10), simplify = FALSE)
+# weights
+ws <- replicate(5, rpois(10, 5) + 1, simplify = FALSE)
+
+# unweighted means easy
+unlist(lapply(xs, mean))
+
+# weighted mean messy with lapply()
+unlist(lapply(seq_along(xs), function(i){
+  weighted.mean(xs[[i]], ws[[i]])
+}))
+
+# so use Map instead
+unlist(Map(weighted.mean, xs, ws))
+
+# this is equivalent to 
+stopifnot(length(xs) == length(ws))
+out <- vector("list", length(xs))
+for (i in seq_along(xs)){
+  out[[i]] <- weighted.mean(xs[[i]], ws[[i]])
+}
+```
+
+### Rolling Computations
+
+* may want to perform rollying calculations. do this in general- same function to do rolling mean or rolling median
+
+```{r}
+rollapply <- function(x, n, f, ...){
+  out <- rep(NA, length(x))
+  
+  # trunc just removes anything after decimal
+  offset <- trunc(n / 2)
+  locs <- (offset + 1):(length(x) - n + offset + 1)
+  num <- vapply(
+    locs,
+    function(i) f(x[(i - offset):(i + offset)], ...),
+    numeric(1)
+  )
+  # first offset amount will be NA's
+  c(rep(NA, offset), num)
+}
+
+set.seed(123)
+x <- seq(1, 3, length(1e2)) + rt(1e2, df = 2) / 3
+
+plot(x)
+lines(rollapply(x, 5, mean), col = 'blue')
+lines(rollapply(x, 5, median), col = 'red')
+```
+
+* the zoo::rollapply() function does the same thing. Most useful!!
+
+### Parrellisation
+
+* use mclapply() and mcMap()
+
+```{r}
+library(parallel)
+unlist(mclapply(1:10, sqrt, mc.cores = 4))
+unlist(mcMap(weighted.mean, 1:10, 10:20, mc.cores = 4))
+```
+
+* also check out pvec()
+
+### Manipulating matrices and data frames
+
+* functionals can be used to eliminate loops in common data manipulation tasks. for matrices we have: apply(), sweep() and outer()
+* tapply() summarises a vector by groups defined by another vector
+* plyr package generalises tapply() (but dplyr better!!)
+
+```{r}
+# apply works on matrices
+
+# margin argument specifies rows (1) or columns (2)
+a <- matrix(1:20, nrow = 5)
+apply(a, 1, mean)
+apply(a, 2, mean)
+```
+
+* note that apply() has no simplify option, also is not idempotent (plyr::aaply() is though)
+
+* sweep() allows you to sweep summary statistic
+
+```{r}
+# here we use sweep to standardise an array
+x <- matrix(rnorm(20, 0, 10), nrow = 4)
+
+# step 1 - sweep to subtract min value in each row from row
+x1 <- sweep(x, 1, apply(x, 1, min), `-`)
+# step 2 - sweep to divide by the max value of each row
+x2 <- sweep(x1, 1, apply(x1, 1, max), `/`)
+
+x
+x1
+x2
+```
+
+* outer() takes multiple vector inputs and creates a matrix or array output where the input function is rung over every combination of the inputs
+
+```{r}
+# create a times table
+outer(1:3, 1:10, "*")
+```
+
+### Group apply
+
+* tapply() can be throught of as a generalisation to apply() that allows for ragged arrays with different numbers of columns. Often needed when summarising data sets:
+
+```{r}
+pulse <- round(rnorm(22, 70, 10/3)) + rep(c(0,5), c(10, 12))
+group <- rep(c("A", "B"), c(10, 12))
+
+tapply(pulse, group, length)
+tapply(pulse, group, mean)
+
+# tapply() splits then applies
+
+split(pulse, group)
+
+# this tapply2() function is equivalent to tapply()
+tapply2 <- function(x, group, f, ..., simplify = TRUE){
+  pieces <- split(x, group)
+  sapply(pieces, f, simplify = simplify)
+}
+
+tapply2(pulse, group, length)
+```
+
+### plyr
+
+* plyr is useful for split-apply-combine. read about it in the paper. Im not sure if dplyr fully supercedes plyr, or if there is still use...
+
+### Manipulating Lists
+
+* we do this with Map(), Reduce() and Filter() to alter, subset and collapse lists
+
+```{r}
+# we have already seen Map, lets have a look at Reduce()
+
+Reduce(sum, 1:3) # sum(sum(1, 2), 3)
+
+# it does this (although real reduce far more complex)
+Reduce2 <- function(f, x){
+  out <- x[[1]]
+  for(i in seq(2, length(x))){
+    out <- f(out, x[[i]])
+  }
+  out
+}
+
+# Reduce is an elegant way to extend functions that deal with two inputs to a function
+# that can deal with any number of inputs.
+
+l <- replicate(5, sample(1:10, 15, replace = T), simplify = F)
+str(l)
+
+# what is the intersect between all in the list?
+Reduce(intersect, l)
+```
+
+### Predicate functionals
+
+* a predicate is a function that returns a single TRUE or FALSE. a predicate FUNCTIONAL applies a predicate to each element of a list or data frame. There are three useful predicate functionals in base R: Filter(), Find() and Position()
+
+* Filter() slects elements that only match predicate
+
+* Find() returns the first element that matches predicate (or last if right = TRUE)
+
+* Position() returns the position of the first element (or last if right = TRUE)
+
+```{r}
+# lets make a custom where() predicate
+
+where <- function(f, x) {
+  vapply(x, f, logical(1))
+}
+
+df <- data.frame(x = 13, y = c('a', 'b', 'c'))
+where(is.factor, df)
+
+str(Filter(is.factor, df))
+str(Find(is.factor, df))
+Position(is.factor, df)
+```

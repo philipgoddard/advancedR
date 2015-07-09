@@ -1,0 +1,209 @@
+---
+title: "Functional Programming"
+output: html_document
+---
+
+* functional programming has three building blocks: anonymous functions, closures (functions written by functions) and lists of functions
+
+### Motivating example
+
+```{r}
+set.seed(1014)
+df <- data.frame(replicate(6, sample(c(1:10, -99), 6, rep = TRUE)))
+names(df) <- letters[1:6]
+df
+
+# how replace -99 with NA?
+df$a[df$a == -99] <- NA
+# bad - will have to copy and paste for each. be DRY!
+
+# write a function?
+fix_missing <- function(x){
+  x[x == -99] <- NA
+  x
+}
+
+# but still clumsy as have to write for each:
+df$a <- fix_missing(df$a)
+
+# lapply to the rescue!
+# note use [] so keeps form as data frame, not returned as a list
+df[] <- lapply(df, fix_missing)
+
+```
+
+* key idea above is function composition. take two simple functions, one that does something to every column, and one the fixes missing values, and combine them to fix missing values in every column.
+
+
+* what if different columns use different codes for missing values? lets use closures to make a function based on a template!
+
+```{r}
+missing_fixer <- function(na_value){
+  function(x){
+    x[x == na_value] <- NA
+    x
+  }
+}
+
+fix_missing_99 <- missing_fixer(-99)
+fix_missing_999 <- missing_fixer(-99)
+
+```
+
+
+* lets look at another example - want summary for columns in a data frame.
+
+```{r}
+mean(df$a)
+median(df$a)
+sd(df$a)
+mad(df$a)
+IQR(df$a)
+
+# then for df$b etc etc
+
+# yaaaawn! lets make a summary function and apply to each column
+summary <- function(x){
+  c(mean(x, na.rm = T), median(x, na.rm = T), sd(x, na.rm = T), mad(x, na.rm = T), IQR(x, na.rm = T))
+}
+lapply(df, summary)
+
+# but still duplication! same arguments for each function
+# take advatage of storing functions in lists
+
+summary <- function(x){
+  funs <- c(mean, median, sd, mad, IQR)
+  lapply(funs, function(f) f(x, na.rm = T))
+}
+sapply(df, summary)
+```
+
+### Anonymous Functions
+
+* use anonymous functions when not worth giving a function a name
+
+```{r}
+sapply(mtcars, function(x) length(unique(x)))
+integrate(function(x) sin(x) ^ 2, 0, pi)
+```
+
+* anonymous functions have formals(), a body() and a parent environment()
+
+```{r}
+# write like this
+(function(x) x + 3)(10)
+# same as
+f <- function(x) x + 3
+f(10)
+```
+
+* a good rule of thumb is that anonymous functions should fit in one line of code, and shouldnt need to use {}
+
+## Closures
+
+* closures are functions written by functions. they enclose the environment of the parent function and can access all of its variables
+
+```{r}
+# example of closure
+power <- function(exponent){
+  function(x){
+    x ^ exponent
+  }
+}
+square <- power(2)
+square(2)
+square(4)
+
+# use pryr::unenclose() to look inside
+library(pryr)
+unenclose(square)
+# its the enclosing environment that changes, not the function itself! 
+```
+
+* the parent environmnet of a clsure is the execution environment of the function that created it
+
+* in R, almost every function is a closure. all functions remember the environment they were created in, typically the gloabl environment if it is a function you have written, or package environment if it is a function someone else had written
+
+### Mutable State
+
+* having variables at two levels allows youo to maintain state across function invocations via <<- Thiis gets around the 'fresh start' limitation by not modifying variables in their local environment. CHanges are made in parent (enclosing) environment, so they are preserved across function calls
+
+```{r}
+new_counter <- function(){
+  i <- 0
+  function(){
+    i <<- i + 1
+    i
+  }
+}
+
+counter_one <- new_counter()
+counter_one()
+counter_one()
+```
+
+* modifying values in parent enviromnent is one way to generate a mutable state in R
+
+### Lists of Functions
+
+* functions can be stored in lists. This makes it easy to work with groups of related functions, in a way similar to data frames making it easier to work with related vectors
+
+```{r}
+compute_mean <- list(
+  base = function(x) mean(x),
+  sum = function(x) sum(x) / length(x),
+  manual = function(x) {
+    total <- 0
+    n <- length(x)
+    for (i in seq_along(x)){
+      total <- total + x[i] / n
+    }
+    total
+  }
+)
+
+x = runif(1e5)
+lapply(compute_mean, function(f) f(x))
+lapply(compute_mean, function(f) system.time(f(x)))
+```
+
+* can also use list of functions to summarise object in multiple ways
+
+```{r}
+x <- 1:10
+funs <- list(
+  sum = sum,
+  mean = mean,
+  median = median
+)
+
+lapply(funs, function(f) f(x, na.rm = TRUE))
+```
+
+### INtegration example
+
+```{r}
+# midpoint 
+midpoint <- function(f, a, b) {
+  (b - a) * f((a + b) / 2)
+}
+
+#trapezoid
+trapezoid <- function(f, a, b) {
+  (b-a) / 2 * (f(a) + f(b))
+}
+
+# composite integration is much better- lets make a functional
+composite <- function(f, a, b, n = 10, rule){
+  points <- seq(a, b, length = n + 1)
+  
+  area <- 0
+  for (i in seq_len(n)){
+    area <- area + rule(f, points[i], points[i+1])
+  }
+  
+  area
+}
+
+composite(sin, 0, pi, n = 10, rule = trapezoid)
+```

@@ -1,0 +1,98 @@
+---
+title: "C7 Notes"
+output: html_document
+---
+
+### R has three OO systems
+
+* S3 - generic function OO. differs from C++ which uses message passing OO. eg message passing might have canvas.drawRect("blue"). Generic function differs as it decides which methd to call eg drawRect(canvas, "blue"). S3 very casual, no formal definition of classes
+
+* S4 - similar to S3, but more formal. has formal class definitions, which descrive represenation and inheritance for each class
+
+* Reference classes - quite different from S3 and S4. RC implements message passing OO, so methods belong to classes not functions. $ is used to seperate objects and methods, eg method calls look like canvas$drawRect("blue")
+
+* also useful to mention base types- internal C level types that underlie the other OO systems. Provide building blocks for the other OO systems.
+
+## Base types
+
+* underlying every R object is a C struct, describes how is stored in memory. Struct contains the contents of the object, the information needed for meomry management, and a type
+
+```{r}
+f <- function(){}
+typeof(f)
+is.function(f)
+
+# the type of primitive functions is "builtin"
+typeof(sum)
+is.primitive(sum)
+```
+
+## S3
+
+* R's first and simplist OO system. Only one used in base and stats package. informal and ad hoc
+
+* most objects are S3
+
+```{r}
+# to test
+# is.object(x) and !isS4(x) eg it is an object and not S4
+# pryr::otype() more helpful
+library(pryr)
+
+df <- data.frame(x = 1:10, y = letters[1:10])
+otype(df)
+#vectors are not S3
+otype(df$x)
+otype(df$y)
+```
+
+
+* S3 methods belong to generic functions, not objects or classes. pryr::ftype() describes the object system eg ftype(mean)
+
+* functions that do method dispatch in C code are called internal generics.
+
+* given a class, the job of S3 generics is to call the right S3 method
+
+* you can see all the methods that belong to a generic with methods()
+
+## Defining classes and creating objects
+
+* use class() to see class, can assign a class eg class(foo) <- "bar"
+
+* can change classes of things easily, but you probably shouldnt! eg
+
+```{r}
+mod <- lm(log(mpg) ~ log(disp), data = mtcars)
+class(mod)
+mod
+class(mod) <- 'data.frame'
+mod
+```
+
+## Creating new methods and generics
+
+* to add new generic, create a function that calls UseMethod()
+
+```{r}
+f <- function(x) UseMethod("f")
+
+# a generic is not useful without methods. lets add a method
+
+f.a <- structure(list(), class = "a")
+a <- structure(list(), class = "a")
+class(a)
+f(a)
+
+# can add new method to existing generiic
+
+mean.a <- function(x) "a"
+mean(a)
+# be careful that generic does not violate expectations of code!
+# no check to make sure method return a class that is compatible with generic
+```
+
+* S4 similar to S3, but more formal
+
+* reference class RC - more familiar to c++ ruby python classes. note that not generic like s3 and s4- methods associated with classes not functions.
+
+* read rest of this chapter, but not done excercises. Useful reference for if wanting to start building own functions for general sharing and use, but not time to dwell on for time being

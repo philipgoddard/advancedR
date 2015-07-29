@@ -1,0 +1,507 @@
+---
+title: "Function operators"
+output: html_document
+---
+
+* The main difference between functionals and function operators is that functionals extract common patterns of loop use, whereas function operators extract common patterns of anonymous function use.
+
+* as an example, see chatty() below. wraps a function, and makes a new function taht prints out its first argument
+
+```{r}
+chatty <- function(f) {
+  function(x, ...) {
+    res <- f(x, ...)
+    cat("Processing", x, "\n", sep = " ")
+    res
+  }
+}
+
+f <- function(x) x ^ 2
+s <- c(3, 2, 1)
+
+chatty(f)(1)
+
+vapply(s, chatty(f), numeric(1))
+```
+
+* we saw previously that functionals like Reduce(), Filter(), and Map() have very few arguments, so we had to use anonymous functions to modify how they worked. In this chapter, we will build specialised substitutions for common anonymous functions that allow us to comvey intent more clearly.
+
+* An important use of FO's is to taranform the input functionto elimintae parameters from the functional. Can also make functions more extensible.
+
+### Behavioural FOs
+
+* we want to look at functions that implement three useful behaviours: i) add a delay to avoid swamping a server with requests ii) print to console every n invocations to check on long running process iii) cache previous computatuions to improve performance
+
+```{r}
+# download file function
+
+download_file <- function(url, ...) {
+  download.file(url, destfile = basename(url), ...)
+}
+
+# then could for list of urls
+# lapply(urls, download_file)
+```
+
+* there are a number of useful features that we might want to add. If we know the list is long, might wnat to print a . every 10 URLs so that we know function is working. If we are downloading via internet, might want to add small delays between each request to avoid hammering server. Can no longer use lapply() as we would need an exteral counter
+
+```{r}
+# here is some code to do the job.
+# note that it is hard to understand because
+# iteration, printing and downloading are intertwined
+
+urls <- c('https://www.blah.com', 'https://www.blah2.com')
+
+# dont actually run the below
+
+#i <- 0
+#for(url in urls) {
+#  i <- i + 1
+#  if (i %% 10 == 0) cat(".")
+#  Sys.sleep(1)
+#  download.file(url)
+#}
+
+# we would prefer something like:
+# lapply(urls, dot.every(10, delay_by(1, download_file)))
+
+
+# implementing delay_by follows same basic template will use in this chapter
+delay_by <- function(delay, f) {
+  function(...) {
+    Sys.sleep(delay)
+    f(...)
+  }
+}
+
+system.time(runif(100))
+system.time(delay_by(0.1, runif)(100))
+
+# think of it that the first bracket delay_by(0.1, runif) makes a new function,
+# which then takes 100 as its argument. simples!
+
+# dot_every has to manage a counter
+
+dot_every <- function(n, f) {
+  i <- 1
+  function(...) {
+    if (i %% n == 0) cat(".")
+    i <<- i + 1
+    f(...)
+  }
+}
+
+# here as we are interested in the iteration part
+# we use lapply with our function operator
+x <- lapply(1:100, runif)
+x <- lapply(1:100, dot_every(10, runif))
+
+# now we can make download function
+download <- dot_every(10, delay_by(1, download_file))
+
+# and presumable apply with 
+# lapply(urls, download)
+```
+
+### Memoisation
+
+* might be concerned about downloading multiple files multiple times. Coul avoid this by calling unique() on the list of URLs. Memoisation is a nice alternative approach- modify the function to automatically cache its results
+
+```{r}
+library(memoise)
+
+slow_function <- function(x) {
+  Sys.sleep(1)
+  10
+}
+
+system.time(slow_function())
+
+fast_function <- memoise(slow_function)
+
+# note have to run twice- the first time is cached
+system.time(fast_function())
+system.time(fast_function())
+```
+
+* memoisation us an example of the memory vs speed tradeoff. lets look at an example:
+
+```{r}
+fib <- memoise(function(n){
+  if (n < 2) return(1)
+  fib(n - 2) + fib(n - 1)
+})
+
+system.time(fib(50))
+system.time(fib(52))
+```
+
+* doesnt make sense to memoise all functions, eg a random number generator would not be random if memoised
+
+* can add memoisation to our download() function
+
+```{r}
+download <- dot_every(10, memoise(delay_by(1, download_file)))
+```
+
+### Capturing function invocations
+
+* A challenge of functionals is that it can be hard to see whats going on behind the curtains. Can use FO's to peer behind the curtains with tee()
+
+```{r}
+ignore <- function(...) NULL
+tee <- function(f, on_input = ignore, on_output = ignore) {
+  function(...) {
+    on_input(...)
+    output <- f(...)
+    on_output(output)
+    output
+  }
+}
+
+# lets use tee() to peer inside uniroot()
+
+g <- function(x) cos(x) - x
+zero <- uniroot(g, c(-5, 5))
+show_x <- function(x, ...) cat(sprintf("%+.08f", x), "\n")
+
+# the location where funcyion evaluated
+zero <- uniroot(tee(g, on_input = show_x), c(-5, 5))
+
+# the value of the function
+zero <- uniroot(tee(g, on_output = show_x), c(-5, 5))
+```
+
+* cat() allows us to see whats happening as the function runs, but it doesnt give us a way to work with the values after the function has completed.
+
+```{r}
+# to do this, create the function remember()
+
+remember <- function() {
+  memory <- list()
+  
+  f <- function(...) {
+    memory <<- append(memory, list(...))
+    invisible()
+  }
+  
+  structure(f, class = "remember")
+}
+
+as.list.remember <- function(x, ...) {
+  environment(x)$memory
+}
+
+print.remember <- function(x, ...) {
+  cat("Remembering...\n")
+  str(as.list(x))
+}
+
+locs <- remember()
+vals <- remember()
+
+zero <- uniroot(tee(g, locs, vals), c(-5, 5))
+x <- unlist(as.list(locs))
+error <- unlist(as.list(vals))
+plot(x, type = "b"); abline(h = 0.739, col = "grey50")
+plot(error, type = "b"); abline(h = 0, col = "grey50")
+```
+
+### Laziness
+
+* The functional operators we've seen so far have a common patters
+
+```{r}
+funop <- function(f, otherargs) {
+  function(...) {
+    # maybe do something
+    res <- f(...)
+    # something else
+    res
+  }
+}
+```
+
+
+* There is a problem with this: functional arguments are lazily evaluated: f() may have changed between applying the FO and evaluating the function. This is a problem if using a for loop or lapply() to apply multiple functions operators
+
+```{r}
+funs <- list(mean = mean, sum = sum)
+funs_m <- lapply(funs, delay_by, delay = 0.1)
+funs_m
+
+# get sum instead of mean
+funs_m$mean(1:10)
+
+# fix by forcing evaluation
+
+delay_by <- function(delay, f) {
+  force(f)
+  function(...) {
+    Sys.sleep(delay)
+    f(...)
+  }
+}
+
+funs <- list(mean = mean, sum = sum)
+funs_m <- lapply(funs, delay_by, delay = 0.1)
+funs_m$mean(1:10)
+```
+
+## Output FO's
+
+* the next step up in complexity is to modify the output of a function
+
+### Minor modifications
+
+* base::Negate() and plyr::failwith() offer two minor, but useful, modifications of a function that are handy used with functionals
+
+* Negate takes a function that returns a logical vector (predicate function) and returns the negation of that function. Useful shortcut when a function provides the opposite of what you need
+
+```{r}
+# capture the essence of negate
+
+Negate <- function(f) {
+  force(f)
+  function(...) !f(...)
+}
+
+Negate(is.null(NULL))
+
+# This is useful to make a function compact() to removes null elements from a list
+compact <- function(x) Filter(Negate(is.null), x)
+```
+
+* plyr::failwith() turns a function that throws an error into a function that returns a default value when there is an error.
+
+```{r}
+# essence of failwith is simple, its just a wrapper around try
+
+failwith <- function(default = NULL, f, quiet  = F) {
+  force(f)
+  function(...) {
+    out <- default
+    try(out <- f(...), silent = quiet)
+    out
+  }
+}
+
+#log("a")
+failwith(NA, log, quiet = T)("a")
+```
+
+* failwith is very useful in conjunction with functional. Imagine fitting GLM's to a list of data frames. GLMs can sometimes fail due to optimisation problems. However, would want to fit all, and later look back at failure
+
+```{r, eval = F}
+# could do this
+models <- lapply(datasets, glm, formula = y ~ x1 + x2 + x3)
+
+# but this will allow evaluation to finish even with errors
+models <- lapply(datasets, failwith(NULL, glm), formula = y ~ x1 + x2 + x3)
+
+# could remove failed models with compact()
+ok_models <- compact(models)
+# pull out failed data for investigation
+failed_data <- datasets[vapply(models, is.null, logical(1))]
+```
+
+### Changing what a function does
+
+Instead of returning the original return value, we can return some other effect of the functoin evaluation
+
+```{r}
+# 2 examples:
+
+capture_it <- function(f) {
+  force(f)
+  function(...) {
+    capture.output(f(...))
+  }
+}
+str_out <- capture_it(str)
+str(1:10)
+str_out(1:10)
+```
+
+```{r, eval=F}
+time_it <- function(f) {
+  force(f)
+  function(...){
+    system.time(f(...))
+  }
+}
+
+compute_mean <- list(
+  base = function(x) mean(x),
+  summed = function(x) sum(x) / length(x)
+)
+
+x <- runif(1e6)
+meantime <- time_it(mean)
+meantime(x)
+
+call_fun <- function(f, ...) f(...)
+# huh? this fails. Copied exactly from book!
+lapply(compute_mean, time_it(call_fun), x)
+```
+
+## Input FO's
+
+Next step up is to modify the inputs of a function
+
+### Partial filling
+
+* Common use of anonymous functions is to make a variant of a function that has certain arguments fille din already. This is called partial function application, implemented in pryr::partial
+
+```{r}
+# We can simplify list of functions
+library("pryr")
+funs2 <- list(
+  sum = function(...) sum(..., na.rm = T),
+  mean = function(...) mean(..., na.rm = T),
+  median = function(...) sum(..., na.rm = T)
+  )
+
+funs2 <- list(
+  sum = partial(sum, na.rm = T),
+  mean = partial(mean, na.rm = T),
+  median = partial(median, na.rm = T)
+  )
+```
+
+### Changing input type
+
+* It is possible to make major changes to a functions input, making a function work differently with fundamentally idfferent types of data. There are a few existing functions that work along these lines, such as base::Vectorize
+
+```{r}
+sample2 <- Vectorize(sample, "size", SIMPLIFY = F)
+str(sample2(1:5, c(1, 1, 3)))
+```
+
+* plyr::splat() converts a function taht takes multiple arguments into a function that takes a single list of arfguments
+
+```{r}
+splat2 <- function(f) {
+force(f)
+function(args){
+  do.call(f, args)
+  }
+}
+```
+
+* it is useful when you want to invoke a  function with varying arguments
+
+```{r}
+x <- c(NA, runif(100), 1000)
+args <- list(
+  list(x),
+  list(x, na.rm = T),
+  list(c, na.rm = T, trim = 0.1))
+
+lapply(args, splat2(mean))
+```
+
+* plyr::colwise() converts a vector function to one that works with data frames:
+
+```{r}
+# would get an error
+# median(mtcars)
+
+# this is ok
+median(mtcars$mpg)
+
+# this is ok
+plyr::colwise(median)(mtcars)
+```
+
+
+## Combining FO's
+
+* Function operators can take multiple functions as input. Once example is plyr::each(). It takes a list of vectorised functions and combines them into a single function
+
+```{r}
+summaries <- plyr::each(mean, sd, median)
+summaries(1:10)
+```
+
+
+### Function composition
+
+* An important way to combine functioons is throigh composition: f(g(x)). for example
+
+```{r}
+sapply(mtcars, function(x) length(unique(x)))
+
+# could use a composite function
+compose <- function(f, g) {
+  function(...) f(g(...))
+}
+
+sapply(mtcars, compose(length, unique))
+
+# do with an infix operator:
+
+"%o%" <- compose
+
+sapply(mtcars, length %o% unique)
+
+#####
+sqrt(1 + 8)
+compose(sqrt, `+`)(1, 8)
+(sqrt %o% `+`)(1, 8)
+```
+
+* we can have a very succinct implementation of Negate, which is a partially evaluated version of compose:
+```{r}
+Negate <- partial(compose, `!`)
+```
+
+* we could implement population standard devation:
+
+```{r}
+square <- function(x) x ^ 2
+deviation <- function(x) x - mean(x)
+
+sd2 <- sqrt %o% mean %o% square %o% deviation
+sd2(1:10)
+```
+
+* This style of programming is called tacit or point free programming. Not terribly natural or elegant in R, but fun to play with!
+
+* compose() is particulary useful used in conjunction with partial(), because partial() allows you to supply additional arguments to the functions being composed.
+
+### Logical predicates and boolean algebra
+
+* When use Filter() and other functionals that work with logical predicates, often find doing stuff like:
+
+```{r}
+head(Filter(function(x) is.character(x) || is.factor(x), iris))
+```
+
+```{r}
+# as an alternative...
+and <- function(f1, f2) {
+  force(f1); force(f2)
+  function(...) {
+    f1(...) && f2(...)
+  }
+}
+
+or <- function(f1, f2) {
+  force(f1); force(f2)
+  function(...) {
+    f1(...) || f2(...)
+  }
+}
+
+not <- function(f) {
+  force(f)
+  function(...) {
+    !f(...)
+  }
+}
+
+# now can do stuff like
+head(Filter(or(is.character, is.factor), iris))
+head(Filter(not(is.numeric), iris))
+```

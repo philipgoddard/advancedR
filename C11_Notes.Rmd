@@ -311,3 +311,217 @@ str(Filter(is.factor, df))
 str(Find(is.factor, df))
 Position(is.factor, df)
 ```
+
+### Mathematical functions
+
+* investigate a few of R's built in mathematical functionals. focus upon integrate(), uniroot() and optimise()
+
+```{r}
+# investigate with simple function sin()
+# integrate function
+integrate(sin, 0, pi)
+
+# find where function hits zero
+str(uniroot(sin, pi * c(1/2, 3/2)))
+
+#  find location of lowest (or highest) value of f
+str(optimise(sin, c(0, 2 * pi)))
+str(optimise(sin, c(0, 2 * pi), maximum = T))
+```
+
+* in statistics, optimisation often useful for maximum liklihood estimations. Here, we have two sets of parameters, the data, which is fixed for a given problem, and a set of parameters, which we vary as we try to find the maximum. The two sets of parameters make the problem well suited for closures.
+
+```{r}
+# example: MLE estimate for lambda when data comes from poisson
+
+# first make a function factory, which makes a function to compute
+# negative log liklihood for given data set
+poisson_nll <- function(x) {
+  n <- length(x)
+  sum_x <- sum(x)
+  function(lambda) {
+    n * lambda - sum_x * log(lambda)
+  }
+}
+
+x1 <- c(41, 30, 28, 29, 24, 20, 29, 31, 38)
+x2 <- c(6, 4, 2, 5, 5, 7, 2, 5, 6, 8, 2, 5, 6, 7, 7, 3)
+nll1 <-  poisson_nll(x1)
+nll2 <- poisson_nll(x2)
+
+# then use optimise over range of lambda to find the minimum
+optimise(nll1, c(0, 100))$minimum
+optimise(nll2, c(0, 100))$minimum
+```
+
+* note taht there is an optim() function as well, that generalises for higher dimensions. 
+
+### As-is loops
+
+* some loops should be left as loops. If this causes muchos slowness, then get cracking in c++
+
+* situations to discuss are: modifying in place, recursive functions and while loops
+
+```{r}
+# when need to modify part of an existing data frame, its often better to use a for loop
+
+trans <- list(
+  disp = function(x) x * 0.016,
+  am = function(x) factor(x, levels = c("auto", "manual"))
+)
+
+for (var in names(trans)) {
+  mtcars[[var]] <- trans[[var]](mtcars[[var]])
+}
+
+# doing this with an lapply would need <<-, and would make code
+# hard to understand
+```
+
+```{r}
+# recursive relationships
+# for example, exponential smoothing
+
+exps <- function(x, alpha) {
+  s <- numeric(length(x) + 1)
+  for (i in seq_along(s)){
+    if(i == 1) {
+      s[i] <- x[i]
+      } else {
+        s[i] <- alpha * x[i - 1] + (1 - alpha) * s[i - 1]
+      }
+    }
+  s
+}
+
+x <- runif(6)
+exps(x, 0.6)
+
+# cannot eliminate loop as we are reliant on lags
+```
+
+```{r}
+# while loops
+# obviously will keep running  until condition is met, because you
+# dont know in advance when the condition will be met!
+
+i <- 1
+while(i <= 10) {
+  print(i)
+  i <- i + 1
+}
+
+i <- 0
+while(TRUE) {
+  if(runif(1) > 0.9) break
+  i <- i + 1
+}
+i
+```
+
+### A familily of functions
+
+* start by building an addition function
+
+```{r}
+add <- function(x, y){
+  stopifnot(length(x) == 1,
+            length(y) == 1,
+            is.numeric(x),
+            is.numeric(y))
+  x + y
+}
+```
+
+* now add a na.rm argument. If x missing return y, and vice versa. If both, return identity
+
+```{r}
+rm_na <- function(x, y, identity) {
+  if(is.na(x) && is.na(y)) {
+    identity
+  } else if (is.na(x)) {
+    y
+  } else {
+    x
+  }
+}
+
+# now can write a version of add() that can deal with missing values
+
+add <- function(x, y, na.rm = F) {
+  ifelse(na.rm && (is.na(x) || is.na(y)), rm_na(x, y, 0), x + y)
+}
+
+add(10, NA)
+add(NA, 10, na.rm = T)
+add(NA, NA)
+add(NA, NA, na.rm = T)
+```
+
+* now can make a bit more useful: multiple inputs to make a function that is equivalent to sum()
+
+```{r}
+r_add <- function(xs, na.rm = T) {
+  Reduce(function(x, y) add(x, y, na.rm = na.rm), xs, init = 0)
+}
+r_add(1:10)
+r_add(c(1, 2, 4))
+r_add(NA, na.rm = T)
+```
+
+* how about vector sums? could use Map() or vapply()
+
+```{r}
+v_add1 <- function(x, y, na.rm = F) {
+  stopifnot(length(x) == length(y),
+            is.numeric(x),
+            is.numeric(y))
+  if(length(x) == 0) return(numeric())
+  simplify2array(
+    Map(function(x, y) add(x, y, na.rm = na.rm), x, y)
+  )
+}
+
+v_add2 <- function(x, y, na.rm = F) {
+  stopifnot(length(x) == length(y),
+            is.numeric(x),
+            is.numeric(y))
+  vapply(seq_along(x),
+         function(i) add(x[i], y[i], na.rm = na.rm),
+         numeric(1))
+}
+
+v_add1((1:10), (1:10))
+v_add2((1:10), (1:10))
+```
+
+* how about cumulative sum?
+
+```{r}
+c_add <- function(xs, na.rm = FALSE) {
+  Reduce(function(x, y) add(x, y, na.rm = na.rm),
+         xs,
+         accumulate = T)
+}
+
+c_add(1:10)
+# this is equivalent to cumsum()
+```
+
+* can generalise for more complicated data structures
+
+```{r}
+row_sum <- function(x, na.rm = F) {
+  apply(x, 1, add, na.rm = na.rm)
+}
+
+col_sum <- function(x, na.rm = F) {
+  apply(x, 2, add, na.rm = na.rm)
+}
+
+arr_sum <- function(x, dim, na.rm = F) {
+  apply(x, dim, add, na.rm = na.rm)
+}
+```
+
+* Why bother if there are functions in base R which are muxh faster? a) to learn b) to customise functions which dont exist in base R- other operators may not have as rich set of functionality as addition
